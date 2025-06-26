@@ -1,0 +1,143 @@
+version: '3.8'
+
+services:
+  # PostgreSQL数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: adspower_postgres
+    environment:
+      POSTGRES_DB: adspower_db
+      POSTGRES_USER: adspower
+      POSTGRES_PASSWORD: adspower123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - adspower_network
+    restart: unless-stopped
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: adspower_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - adspower_network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # 后端API服务
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: adspower_backend
+    environment:
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_USER=adspower
+      - POSTGRES_PASSWORD=adspower123
+      - POSTGRES_DB=adspower_db
+      - POSTGRES_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app
+    networks:
+      - adspower_network
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # 前端服务（开发环境）
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    container_name: adspower_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    networks:
+      - adspower_network
+    depends_on:
+      - backend
+    restart: unless-stopped
+    environment:
+      - REACT_APP_API_BASE_URL=http://localhost:8000
+    command: npm start
+
+  # Nginx反向代理（生产环境）
+  nginx:
+    image: nginx:alpine
+    container_name: adspower_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    networks:
+      - adspower_network
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    profiles:
+      - production
+
+  # Prometheus监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: adspower_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - adspower_network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Grafana可视化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: adspower_grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    networks:
+      - adspower_network
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  adspower_network:
+    driver: bridge
