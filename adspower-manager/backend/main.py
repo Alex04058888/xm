@@ -17,6 +17,7 @@ from app.api.auth import router as auth_router
 from app.api.profiles import router as profiles_router
 from app.api.rpa import router as rpa_router
 from app.api.tasks import router as tasks_router
+from app.api.websocket import router as websocket_router
 
 # 配置结构化日志
 structlog.configure(
@@ -150,6 +151,7 @@ app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["认
 app.include_router(profiles_router, prefix=f"{settings.API_V1_STR}/profiles", tags=["环境管理"])
 app.include_router(rpa_router, prefix=f"{settings.API_V1_STR}/rpa", tags=["RPA流程"])
 app.include_router(tasks_router, prefix=f"{settings.API_V1_STR}/tasks", tags=["任务管理"])
+app.include_router(websocket_router, prefix=f"{settings.API_V1_STR}", tags=["WebSocket"])
 
 
 @app.on_event("startup")

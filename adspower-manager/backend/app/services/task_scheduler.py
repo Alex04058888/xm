@@ -14,6 +14,7 @@ from app.models.rpa import RPAFlow
 from app.models.user import User
 from app.services.rpa_engine import rpa_engine, RPAExecutionContext, RPANodeError
 from app.core.database import SessionLocal
+from app.services.websocket_manager import task_notifier
 
 logger = structlog.get_logger()
 
@@ -138,8 +139,11 @@ class TaskScheduler:
             # 开始执行
             task.start_execution()
             db.commit()
-            
+
             logger.info("Task execution started", task_id=task_id)
+
+            # 通知WebSocket客户端任务开始
+            await task_notifier.notify_task_started(task_id, task.to_dict())
             
             # 创建执行上下文
             context = RPAExecutionContext(task, profile, rpa_flow)
@@ -150,16 +154,19 @@ class TaskScheduler:
             # 更新任务结果
             task.complete_execution(True, result=result)
             task.logs = context.execution_logs
-            
+
             # 更新RPA流程统计
             rpa_flow.increment_execution(True)
-            
+
             # 更新profile状态
             profile.update_status("inactive")
-            
+
             db.commit()
-            
+
             logger.info("Task execution completed successfully", task_id=task_id)
+
+            # 通知WebSocket客户端任务完成
+            await task_notifier.notify_task_completed(task_id, result)
             
         except RPANodeError as e:
             # RPA节点执行错误
@@ -186,6 +193,9 @@ class TaskScheduler:
                 node_index=e.node_index,
                 node_type=e.node_type
             )
+
+            # 通知WebSocket客户端任务失败
+            await task_notifier.notify_task_failed(task_id, e.message, e.node_index)
             
         except Exception as e:
             # 其他错误
@@ -205,6 +215,9 @@ class TaskScheduler:
             db.commit()
             
             logger.error("Task execution failed", task_id=task_id, error=str(e))
+
+            # 通知WebSocket客户端任务失败
+            await task_notifier.notify_task_failed(task_id, str(e))
             
         finally:
             # 清理
